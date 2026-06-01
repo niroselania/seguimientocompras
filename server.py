@@ -48,8 +48,17 @@ def period_for(value):
 def clean_amount(value):
     if value is None or value == "":
         raise ValueError("El monto es obligatorio.")
+    raw = str(value).strip().replace("$", "").replace(" ", "")
+    if "," in raw:
+        normalized = raw.replace(".", "").replace(",", ".")
+    else:
+        parts = raw.split(".")
+        if len(parts) > 1 and all(len(part) == 3 for part in parts[1:]):
+            normalized = raw.replace(".", "")
+        else:
+            normalized = raw
     try:
-        amount = float(str(value).replace(".", "").replace(",", "."))
+        amount = float(normalized)
     except ValueError as exc:
         raise ValueError("El monto debe ser numerico.") from exc
     if amount <= 0:
