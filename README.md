@@ -27,3 +27,7 @@ App web para registrar las mismas columnas de la planilla original y controlar e
 4. Mantener el volumen `seguimiento_descuento_data` para conservar la base SQLite.
 
 La primera vez que inicia, carga las filas actuales de `seed_data.json` si la base esta vacia.
+
+## Backup
+
+El boton `Exportar Excel` descarga un archivo `.xlsx` con los registros actuales, el periodo de cupo, total acumulado, disponible y estado.

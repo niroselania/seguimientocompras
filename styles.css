@@ -202,8 +202,37 @@ button {
   font-size: 14px;
 }
 
-.toolbar input {
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: min(560px, 100%);
+}
+
+.toolbar-actions input {
   max-width: 420px;
+}
+
+.export-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid #b9c6bf;
+  border-radius: 6px;
+  color: var(--green-dark);
+  background: #f8fbf9;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.export-button:hover {
+  border-color: var(--green);
+  background: #eef5f1;
 }
 
 .summary-grid {
@@ -318,6 +347,16 @@ td.amount {
 
   .limit {
     text-align: left;
+  }
+
+  .toolbar-actions {
+    align-items: stretch;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .toolbar-actions input {
+    max-width: none;
   }
 
   .form-grid,

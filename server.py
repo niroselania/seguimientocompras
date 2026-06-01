@@ -1,10 +1,13 @@
+import io
 import json
 import os
 import sqlite3
+import zipfile
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
+from xml.sax.saxutils import escape
 
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", APP_DIR / "data"))
@@ -332,6 +335,153 @@ def summaries():
     return sorted(result, key=lambda x: (x["exceeds_limit"], x["total"]), reverse=True)
 
 
+def excel_col(index):
+    name = ""
+    while index:
+        index, remainder = divmod(index - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def excel_date(value):
+    parsed = parse_purchase_date(value)
+    return (parsed - date(1899, 12, 30)).days
+
+
+def xlsx_cell(row_idx, col_idx, value, style=None):
+    ref = f"{excel_col(col_idx)}{row_idx}"
+    style_attr = f' s="{style}"' if style is not None else ""
+    if isinstance(value, (int, float)):
+        return f'<c r="{ref}"{style_attr}><v>{value}</v></c>'
+    text = escape("" if value is None else str(value))
+    return f'<c r="{ref}" t="inlineStr"{style_attr}><is><t>{text}</t></is></c>'
+
+
+def build_backup_xlsx():
+    headers = [
+        "Año Fiscal",
+        "Fecha de Compra (DD/MM/AAAA)",
+        "Nombre y Apellido",
+        "DNI",
+        "Mail asociado a Patagonia",
+        "Numero de Orden",
+        "Monto de la compra (con el descuento del 70% aplicado)",
+        "Periodo",
+        "Total persona en periodo",
+        "Disponible",
+        "Estado",
+    ]
+    rows = purchase_query()
+    summary_lookup = {
+        (item["dni"], item["period_start"], item["period_end"]): item
+        for item in summaries()
+    }
+
+    sheet_rows = []
+    sheet_rows.append(
+        '<row r="1">'
+        + "".join(xlsx_cell(1, idx, header, style=1) for idx, header in enumerate(headers, 1))
+        + "</row>"
+    )
+    for row_idx, row in enumerate(rows, 2):
+        summary = summary_lookup[(row["dni"], row["period_start"], row["period_end"])]
+        values = [
+            row["fiscal_year"],
+            excel_date(row["purchase_date"]),
+            row["full_name"],
+            row["dni"],
+            row["email"],
+            row["order_number"],
+            row["amount"],
+            f'{format_display_date(row["period_start"])} al {format_display_date(row["period_end"])}',
+            summary["total"],
+            summary["available"],
+            "Excedido" if summary["exceeds_limit"] else "Dentro del cupo",
+        ]
+        cells = []
+        for col_idx, value in enumerate(values, 1):
+            style = None
+            if col_idx == 2:
+                style = 2
+            elif col_idx in (7, 9, 10):
+                style = 3
+            cells.append(xlsx_cell(row_idx, col_idx, value, style=style))
+        sheet_rows.append(f'<row r="{row_idx}">' + "".join(cells) + "</row>")
+
+    worksheet = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <cols>
+    <col min="1" max="1" width="12" customWidth="1"/>
+    <col min="2" max="2" width="18" customWidth="1"/>
+    <col min="3" max="3" width="26" customWidth="1"/>
+    <col min="4" max="4" width="14" customWidth="1"/>
+    <col min="5" max="5" width="34" customWidth="1"/>
+    <col min="6" max="6" width="20" customWidth="1"/>
+    <col min="7" max="7" width="24" customWidth="1"/>
+    <col min="8" max="8" width="24" customWidth="1"/>
+    <col min="9" max="10" width="22" customWidth="1"/>
+    <col min="11" max="11" width="18" customWidth="1"/>
+  </cols>
+  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+  <sheetData>{''.join(sheet_rows)}</sheetData>
+  <autoFilter ref="A1:K{max(1, len(rows) + 1)}"/>
+</worksheet>"""
+    styles = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <numFmts count="2">
+    <numFmt numFmtId="164" formatCode="dd/mm/yyyy"/>
+    <numFmt numFmtId="165" formatCode="$ #,##0"/>
+  </numFmts>
+  <fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/><color rgb="FFFFFFFF"/></font></fonts>
+  <fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1E6B52"/></patternFill></fill></fills>
+  <borders count="1"><border><left/><right/><top/><bottom/></border></borders>
+  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+  <cellXfs count="4">
+    <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="1" fillId="1" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
+    <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+    <xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
+  </cellXfs>
+</styleSheet>"""
+    workbook = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Descuento Total" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"""
+    workbook_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>"""
+    root_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"""
+    content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>"""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", root_rels)
+        zf.writestr("xl/workbook.xml", workbook)
+        zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
+        zf.writestr("xl/styles.xml", styles)
+        zf.writestr("xl/worksheets/sheet1.xml", worksheet)
+    return buffer.getvalue()
+
+
+def format_display_date(value):
+    parsed = parse_purchase_date(value)
+    return parsed.strftime("%d/%m/%Y")
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args))
@@ -367,6 +517,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/summaries":
             self.send_json(summaries())
+            return
+        if parsed.path == "/api/export.xlsx":
+            self.send_xlsx(build_backup_xlsx())
             return
         if parsed.path in ("/", "/index.html"):
             self.serve_file(APP_DIR / "index.html", "text/html; charset=utf-8")
@@ -463,6 +616,18 @@ class Handler(BaseHTTPRequestHandler):
         body = path.read_bytes()
         self.send_response(200)
         self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_xlsx(self, body):
+        filename = f"seguimiento-descuento-backup-{date.today().isoformat()}.xlsx"
+        self.send_response(200)
+        self.send_header(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
