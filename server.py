@@ -408,9 +408,13 @@ def build_backup_xlsx():
             cells.append(xlsx_cell(row_idx, col_idx, value, style=style))
         sheet_rows.append(f'<row r="{row_idx}">' + "".join(cells) + "</row>")
 
+    last_row = max(1, len(rows) + 1)
     worksheet = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <dimension ref="A1:K{last_row}"/>
+  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>
+  <sheetFormatPr defaultRowHeight="15"/>
   <cols>
     <col min="1" max="1" width="12" customWidth="1"/>
     <col min="2" max="2" width="18" customWidth="1"/>
@@ -423,9 +427,8 @@ def build_backup_xlsx():
     <col min="9" max="10" width="22" customWidth="1"/>
     <col min="11" max="11" width="18" customWidth="1"/>
   </cols>
-  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
   <sheetData>{''.join(sheet_rows)}</sheetData>
-  <autoFilter ref="A1:K{max(1, len(rows) + 1)}"/>
+  <autoFilter ref="A1:K{last_row}"/>
 </worksheet>"""
     styles = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -443,10 +446,14 @@ def build_backup_xlsx():
     <xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
     <xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>
   </cellXfs>
+  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
+  <dxfs count="0"/>
+  <tableStyles count="0" defaultTableStyle="TableStyleMedium2" defaultPivotStyle="PivotStyleLight16"/>
 </styleSheet>"""
     workbook = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <bookViews><workbookView/></bookViews>
   <sheets><sheet name="Descuento Total" sheetId="1" r:id="rId1"/></sheets>
 </workbook>"""
     workbook_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
