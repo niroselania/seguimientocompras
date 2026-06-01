@@ -346,7 +346,7 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     init_db()
-    port = int(os.environ.get("PORT", "8080"))
+    port = int(os.environ.get("PORT", "7070"))
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
     print(f"Seguimiento descuento escuchando en http://0.0.0.0:{port}")
     server.serve_forever()
