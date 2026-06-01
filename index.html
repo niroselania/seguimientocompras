@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Seguimiento Descuento</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Patagonia</p>
+        <h1>Seguimiento Descuento</h1>
+      </div>
+      <div class="limit">
+        <span>Cupo semestral</span>
+        <strong id="limitAmount">$1.400.000</strong>
+      </div>
+    </header>
+
+    <main>
+      <section class="entry-panel">
+        <form id="purchaseForm">
+          <input type="hidden" id="recordId">
+          <div class="form-grid">
+            <label>
+              <span>A&ntilde;o Fiscal</span>
+              <input id="fiscal_year" name="fiscal_year" value="FY27" required>
+            </label>
+            <label>
+              <span>Fecha de Compra</span>
+              <input id="purchase_date" name="purchase_date" type="date" required>
+            </label>
+            <label>
+              <span>Nombre y Apellido</span>
+              <input id="full_name" name="full_name" autocomplete="name" required>
+            </label>
+            <label>
+              <span>DNI</span>
+              <input id="dni" name="dni" inputmode="numeric" required>
+            </label>
+            <label>
+              <span>Mail asociado a Patagonia</span>
+              <input id="email" name="email" type="email" autocomplete="email" required>
+            </label>
+            <label>
+              <span>Numero de Orden</span>
+              <input id="order_number" name="order_number" required>
+            </label>
+            <label>
+              <span>Monto de la compra</span>
+              <input id="amount" name="amount" type="number" min="0" step="0.01" required>
+            </label>
+          </div>
+          <div class="actions">
+            <button type="submit" class="primary" id="saveButton">Guardar compra</button>
+            <button type="button" id="cancelButton" class="ghost" hidden>Cancelar edicion</button>
+          </div>
+        </form>
+        <aside id="warningBox" class="warning" hidden></aside>
+      </section>
+
+      <section class="toolbar">
+        <div>
+          <h2>Registros</h2>
+          <p id="periodText">Cupo renovable cada 6 meses desde el 01/05/2026.</p>
+        </div>
+        <input id="search" placeholder="Buscar por nombre, DNI, mail u orden">
+      </section>
+
+      <section class="summary-grid" id="summaryGrid"></section>
+
+      <section class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>A&ntilde;o Fiscal</th>
+              <th>Fecha de Compra</th>
+              <th>Nombre y Apellido</th>
+              <th>DNI</th>
+              <th>Mail asociado a Patagonia</th>
+              <th>Numero de Orden</th>
+              <th>Monto de la compra</th>
+              <th>Periodo</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="purchaseRows"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

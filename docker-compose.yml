@@ -1,0 +1,12 @@
+services:
+  seguimiento-descuento:
+    build: .
+    container_name: seguimiento-descuento
+    ports:
+      - "8080:8080"
+    volumes:
+      - seguimiento_descuento_data:/data
+    restart: unless-stopped
+
+volumes:
+  seguimiento_descuento_data:
