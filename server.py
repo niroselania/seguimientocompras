@@ -4,7 +4,7 @@ import sqlite3
 from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", APP_DIR / "data"))
@@ -14,6 +14,7 @@ LIMIT_AMOUNT = 1_400_000
 ANCHOR_DATE = date(2026, 5, 1)
 PERIOD_MONTHS = 6
 AMOUNT_FIX_FLAG = "amounts_divided_by_10_20260601"
+AMOUNT_FIX_V2_FLAG = "seed_amounts_normalized_20260601_v2"
 
 
 def parse_purchase_date(value):
@@ -105,6 +106,7 @@ def init_db():
             for row in rows:
                 insert_purchase(con, row, commit=False)
         fix_amounts_if_needed(con)
+        normalize_seed_amounts(con)
         con.commit()
 
 
@@ -148,6 +150,51 @@ def fix_amounts_if_needed(con):
     con.execute(
         "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)",
         [AMOUNT_FIX_FLAG, f"corrected:{corrected}"],
+    )
+
+
+def normalize_seed_amounts(con):
+    done = con.execute(
+        "SELECT value FROM app_meta WHERE key = ?", [AMOUNT_FIX_V2_FLAG]
+    ).fetchone()
+    if done:
+        return
+
+    if not SEED_PATH.exists():
+        con.execute(
+            "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)",
+            [AMOUNT_FIX_V2_FLAG, "no_seed"],
+        )
+        return
+
+    corrected = 0
+    factors = (10, 100, 1000)
+    for row in json.loads(SEED_PATH.read_text(encoding="utf-8")):
+        expected = round(float(row["amount"]), 2)
+        inflated_values = [round(expected * factor, 2) for factor in factors]
+        placeholders = ",".join("?" for _ in inflated_values)
+        cur = con.execute(
+            f"""
+            UPDATE purchases
+            SET amount = ?
+            WHERE dni = ?
+              AND order_number = ?
+              AND purchase_date = ?
+              AND ROUND(amount, 2) IN ({placeholders})
+            """,
+            [
+                expected,
+                row["dni"],
+                row["order_number"],
+                row["purchase_date"],
+                *inflated_values,
+            ],
+        )
+        corrected += cur.rowcount
+
+    con.execute(
+        "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)",
+        [AMOUNT_FIX_V2_FLAG, f"corrected:{corrected}"],
     )
 
 
@@ -330,6 +377,21 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/app.js":
             self.serve_file(APP_DIR / "app.js", "application/javascript; charset=utf-8")
             return
+        static_name = unquote(parsed.path).lstrip("/")
+        static_types = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".svg": "image/svg+xml",
+            ".gif": "image/gif",
+        }
+        static_path = APP_DIR / static_name
+        if static_path.is_file() and static_path.parent == APP_DIR:
+            content_type = static_types.get(static_path.suffix.lower())
+            if content_type:
+                self.serve_file(static_path, content_type)
+                return
         self.send_json({"error": "No encontrado."}, 404)
 
     def do_POST(self):
