@@ -13,6 +13,7 @@ SEED_PATH = APP_DIR / "seed_data.json"
 LIMIT_AMOUNT = 1_400_000
 ANCHOR_DATE = date(2026, 5, 1)
 PERIOD_MONTHS = 6
+AMOUNT_FIX_FLAG = "amounts_divided_by_10_20260601"
 
 
 def parse_purchase_date(value):
@@ -67,6 +68,14 @@ def init_db():
     with db() as con:
         con.execute(
             """
+            CREATE TABLE IF NOT EXISTS app_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        con.execute(
+            """
             CREATE TABLE IF NOT EXISTS purchases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 fiscal_year TEXT NOT NULL,
@@ -86,7 +95,51 @@ def init_db():
             rows = json.loads(SEED_PATH.read_text(encoding="utf-8"))
             for row in rows:
                 insert_purchase(con, row, commit=False)
+        fix_amounts_if_needed(con)
         con.commit()
+
+
+def fix_amounts_if_needed(con):
+    done = con.execute(
+        "SELECT value FROM app_meta WHERE key = ?", [AMOUNT_FIX_FLAG]
+    ).fetchone()
+    if done:
+        return
+
+    if not SEED_PATH.exists():
+        con.execute(
+            "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)",
+            [AMOUNT_FIX_FLAG, "no_seed"],
+        )
+        return
+
+    corrected = 0
+    for row in json.loads(SEED_PATH.read_text(encoding="utf-8")):
+        expected = round(float(row["amount"]), 2)
+        inflated = round(expected * 10, 2)
+        cur = con.execute(
+            """
+            UPDATE purchases
+            SET amount = ?
+            WHERE dni = ?
+              AND order_number = ?
+              AND purchase_date = ?
+              AND ABS(amount - ?) < 0.01
+            """,
+            [
+                expected,
+                row["dni"],
+                row["order_number"],
+                row["purchase_date"],
+                inflated,
+            ],
+        )
+        corrected += cur.rowcount
+
+    con.execute(
+        "INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?)",
+        [AMOUNT_FIX_FLAG, f"corrected:{corrected}"],
+    )
 
 
 def insert_purchase(con, payload, commit=True):
