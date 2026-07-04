@@ -15,6 +15,17 @@ const recordId = document.querySelector("#recordId");
 
 let purchases = [];
 
+function todayISO() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function setPurchaseDateToToday() {
+  form.purchase_date.value = todayISO();
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json" },
@@ -38,7 +49,7 @@ function periodText(row) {
 function formData() {
   return {
     fiscal_year: form.fiscal_year.value,
-    purchase_date: form.purchase_date.value,
+    purchase_date: todayISO(),
     full_name: form.full_name.value,
     dni: form.dni.value,
     email: form.email.value,
@@ -129,7 +140,7 @@ async function loadPurchases() {
 function fillForm(row) {
   recordId.value = row.id;
   form.fiscal_year.value = row.fiscal_year;
-  form.purchase_date.value = row.purchase_date;
+  setPurchaseDateToToday();
   form.full_name.value = row.full_name;
   form.dni.value = row.dni;
   form.email.value = row.email;
@@ -144,6 +155,7 @@ function fillForm(row) {
 function resetForm() {
   form.reset();
   form.fiscal_year.value = "FY27";
+  setPurchaseDateToToday();
   recordId.value = "";
   saveButton.textContent = "Guardar compra";
   cancelButton.hidden = true;
@@ -186,4 +198,5 @@ rowsEl.addEventListener("click", async (event) => {
 api("/api/config").then((config) => {
   document.querySelector("#limitAmount").textContent = pesos.format(config.limit_amount);
 });
+setPurchaseDateToToday();
 loadPurchases();

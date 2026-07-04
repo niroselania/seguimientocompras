@@ -225,7 +225,7 @@ def insert_purchase(con, payload, commit=True):
 
 
 def normalize_payload(payload):
-    purchase_date = parse_purchase_date(payload.get("purchase_date")).isoformat()
+    purchase_date = date.today().isoformat()
     required = {
         "fiscal_year": "Año fiscal",
         "full_name": "Nombre y apellido",
