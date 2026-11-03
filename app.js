@@ -49,7 +49,7 @@ function periodText(row) {
 function formData() {
   return {
     fiscal_year: form.fiscal_year.value,
-    purchase_date: todayISO(),
+    purchase_date: form.purchase_date.value,
     full_name: form.full_name.value,
     dni: form.dni.value,
     email: form.email.value,
@@ -140,7 +140,8 @@ async function loadPurchases() {
 function fillForm(row) {
   recordId.value = row.id;
   form.fiscal_year.value = row.fiscal_year;
-  setPurchaseDateToToday();
+  form.purchase_date.value = row.purchase_date;
+  form.purchase_date.readOnly = false;
   form.full_name.value = row.full_name;
   form.dni.value = row.dni;
   form.email.value = row.email;
@@ -155,6 +156,7 @@ function fillForm(row) {
 function resetForm() {
   form.reset();
   form.fiscal_year.value = "FY27";
+  form.purchase_date.readOnly = true;
   setPurchaseDateToToday();
   recordId.value = "";
   saveButton.textContent = "Guardar compra";

@@ -224,8 +224,10 @@ def insert_purchase(con, payload, commit=True):
     return cur.lastrowid
 
 
-def normalize_payload(payload):
+def normalize_payload(payload, allow_purchase_date=False):
     purchase_date = date.today().isoformat()
+    if allow_purchase_date:
+        purchase_date = parse_purchase_date(payload.get("purchase_date", "")).isoformat()
     required = {
         "fiscal_year": "Año fiscal",
         "full_name": "Nombre y apellido",
@@ -575,7 +577,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             purchase_id = int(self.path.rsplit("/", 1)[1])
-            row = normalize_payload(self.read_json())
+            row = normalize_payload(self.read_json(), allow_purchase_date=True)
             check = enriched_purchase({**row, "id": purchase_id})
             with db() as con:
                 con.execute(
