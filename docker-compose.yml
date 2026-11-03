@@ -4,6 +4,9 @@ services:
     container_name: seguimiento-descuento
     ports:
       - "7070:7070"
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS:-}
     volumes:
       - seguimiento_descuento_data:/data
     restart: unless-stopped
