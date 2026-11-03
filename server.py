@@ -312,9 +312,28 @@ def enriched_purchase(row):
     return row
 
 
-def summaries():
+def summaries(current_only=True):
     grouped = {}
-    for row in purchase_query():
+    rows = purchase_query()
+    current_start, current_end = period_for(date.today().isoformat())
+    if current_only:
+        for row in rows:
+            key = (row["dni"], current_start, current_end)
+            if key not in grouped:
+                grouped[key] = {
+                    "dni": row["dni"],
+                    "full_name": row["full_name"],
+                    "email": row["email"],
+                    "period_start": current_start,
+                    "period_end": current_end,
+                    "total": 0,
+                    "orders": 0,
+                }
+        rows = [
+            row for row in rows
+            if current_start <= row["purchase_date"] <= current_end
+        ]
+    for row in rows:
         key = (row["dni"], row["period_start"], row["period_end"])
         if key not in grouped:
             grouped[key] = {
@@ -359,7 +378,7 @@ def xlsx_cell(row_idx, col_idx, value, style=None):
     return f'<c r="{ref}" t="inlineStr"{style_attr}><is><t>{text}</t></is></c>'
 
 
-def build_backup_xlsx():
+def build_backup_xlsx(period_start=None, period_end=None, dni=None):
     headers = [
         "Año Fiscal",
         "Fecha de Compra (DD/MM/AAAA)",
@@ -374,9 +393,20 @@ def build_backup_xlsx():
         "Estado",
     ]
     rows = purchase_query()
+    if period_start or period_end:
+        if not period_start or not period_end:
+            raise ValueError("Debe indicar el inicio y el fin del período.")
+        start = parse_purchase_date(period_start)
+        expected_start, expected_end = period_for(start.isoformat())
+        if start.isoformat() != expected_start or period_end != expected_end:
+            raise ValueError("El período indicado no corresponde a un semestre válido.")
+        rows = [row for row in rows if period_start <= row["purchase_date"] <= period_end]
+    if dni:
+        rows = [row for row in rows if row["dni"] == dni]
+    rows.sort(key=lambda row: (row["full_name"].casefold(), row["purchase_date"], row["id"]))
     summary_lookup = {
         (item["dni"], item["period_start"], item["period_end"]): item
-        for item in summaries()
+        for item in summaries(current_only=False)
     }
 
     sheet_rows = []
@@ -512,11 +542,18 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == "/api/config":
+            period_start, period_end = period_for(date.today().isoformat())
             self.send_json(
                 {
                     "limit_amount": LIMIT_AMOUNT,
                     "anchor_date": ANCHOR_DATE.isoformat(),
                     "period_months": PERIOD_MONTHS,
+                    "current_period_start": period_start,
+                    "current_period_end": period_end,
+                    "employees": [
+                        {"dni": row["dni"], "full_name": row["full_name"]}
+                        for row in {item["dni"]: item for item in reversed(purchase_query())}.values()
+                    ],
                 }
             )
             return
@@ -528,7 +565,22 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(summaries())
             return
         if parsed.path == "/api/export.xlsx":
-            self.send_xlsx(build_backup_xlsx())
+            query = parse_qs(parsed.query)
+            period = query.get("period", ["all"])[0]
+            dni = query.get("dni", [""])[0]
+            if period == "all":
+                body = build_backup_xlsx(dni=dni or None)
+                suffix = f"-{dni}" if dni else "-todos"
+                self.send_xlsx(body, f"seguimiento-compras{suffix}-{date.today().isoformat()}.xlsx")
+                return
+            try:
+                period_start, period_end = period.split("|", 1)
+                body = build_backup_xlsx(period_start, period_end, dni or None)
+                person_suffix = f"-{dni}" if dni else "-todos"
+                filename = f"seguimiento-compras{person_suffix}-{period_start}-al-{period_end}.xlsx"
+                self.send_xlsx(body, filename)
+            except (ValueError, TypeError):
+                self.send_json({"error": "Período de exportación inválido."}, 400)
             return
         if parsed.path in ("/", "/index.html"):
             self.serve_file(APP_DIR / "index.html", "text/html; charset=utf-8")
@@ -629,8 +681,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_xlsx(self, body):
-        filename = f"seguimiento-descuento-backup-{date.today().isoformat()}.xlsx"
+    def send_xlsx(self, body, filename):
         self.send_response(200)
         self.send_header(
             "Content-Type",

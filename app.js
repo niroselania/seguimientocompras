@@ -12,6 +12,9 @@ const summaryGrid = document.querySelector("#summaryGrid");
 const saveButton = document.querySelector("#saveButton");
 const cancelButton = document.querySelector("#cancelButton");
 const recordId = document.querySelector("#recordId");
+const exportPeriod = document.querySelector("#exportPeriod");
+const exportPerson = document.querySelector("#exportPerson");
+const exportButton = document.querySelector("#exportButton");
 
 let purchases = [];
 
@@ -44,6 +47,41 @@ function formatDate(value) {
 
 function periodText(row) {
   return `${formatDate(row.period_start)} al ${formatDate(row.period_end)}`;
+}
+
+function populateExportPeriods(anchorValue, currentStartValue) {
+  const anchor = new Date(`${anchorValue}T00:00:00Z`);
+  const currentStart = new Date(`${currentStartValue}T00:00:00Z`);
+  const periods = [];
+  for (let start = new Date(anchor); start <= currentStart; start.setUTCMonth(start.getUTCMonth() + 6)) {
+    const next = new Date(start);
+    next.setUTCMonth(next.getUTCMonth() + 6);
+    const end = new Date(next.getTime() - 86400000);
+    const startISO = start.toISOString().slice(0, 10);
+    const endISO = end.toISOString().slice(0, 10);
+    periods.push({ value: `${startISO}|${endISO}`, label: `${formatDate(startISO)} al ${formatDate(endISO)}` });
+  }
+  periods.reverse().forEach((period) => {
+    const option = document.createElement("option");
+    option.value = period.value;
+    option.textContent = period.label;
+    exportPeriod.append(option);
+  });
+}
+
+function updateExportLink() {
+  const params = new URLSearchParams({ period: exportPeriod.value });
+  if (exportPerson.value !== "all") params.set("dni", exportPerson.value);
+  exportButton.href = `/api/export.xlsx?${params.toString()}`;
+}
+
+function populateExportPeople(employees) {
+  employees.forEach((employee) => {
+    const option = document.createElement("option");
+    option.value = employee.dni;
+    option.textContent = `${employee.full_name} · DNI ${employee.dni}`;
+    exportPerson.append(option);
+  });
 }
 
 function formData() {
@@ -183,6 +221,8 @@ form.addEventListener("submit", async (event) => {
 
 cancelButton.addEventListener("click", resetForm);
 searchEl.addEventListener("input", () => loadPurchases());
+exportPeriod.addEventListener("change", updateExportLink);
+exportPerson.addEventListener("change", updateExportLink);
 
 rowsEl.addEventListener("click", async (event) => {
   const editId = event.target.dataset.edit;
@@ -199,6 +239,11 @@ rowsEl.addEventListener("click", async (event) => {
 
 api("/api/config").then((config) => {
   document.querySelector("#limitAmount").textContent = pesos.format(config.limit_amount);
+  document.querySelector("#periodText").textContent =
+    `Cupo vigente del ${formatDate(config.current_period_start)} al ${formatDate(config.current_period_end)}; se renueva cada 6 meses.`;
+  populateExportPeriods(config.anchor_date, config.current_period_start);
+  populateExportPeople(config.employees);
+  updateExportLink();
 });
 setPurchaseDateToToday();
 loadPurchases();
