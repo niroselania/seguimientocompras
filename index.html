@@ -3,105 +3,131 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Seguimiento Descuento</title>
+    <meta name="theme-color" content="#101626">
+    <title>Seguimiento de compras · Patagonia</title>
+    <script>try { document.documentElement.dataset.theme = localStorage.getItem("patagonia-theme") || "dark"; } catch (_) { document.documentElement.dataset.theme = "dark"; }</script>
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand">
-        <img class="brand-logo" src="/patagonia%20logo.png" alt="Patagonia">
-        <div>
-          <p class="eyebrow">Patagonia</p>
-          <h1>Seguimiento Descuento</h1>
-        </div>
-      </div>
-      <div class="limit">
-        <span>Cupo semestral</span>
-        <strong id="limitAmount">$1.400.000</strong>
-      </div>
-    </header>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#inicio" aria-label="Patagonia, inicio">
+          <span class="brand-mark"><img src="/patagonia%20logo.png" alt=""></span>
+          <span class="brand-copy"><strong>Patagonia</strong><small>Compras internas</small></span>
+        </a>
 
-    <main>
-      <section class="entry-panel">
-        <form id="purchaseForm">
-          <input type="hidden" id="recordId">
-          <div class="form-grid">
-            <label>
-              <span>A&ntilde;o Fiscal</span>
-              <input id="fiscal_year" name="fiscal_year" value="FY27" required>
-            </label>
-            <label>
-              <span>Fecha de Compra</span>
-              <input id="purchase_date" name="purchase_date" type="date" required readonly>
-            </label>
-            <label>
-              <span>Nombre y Apellido</span>
-              <input id="full_name" name="full_name" autocomplete="name" required>
-            </label>
-            <label>
-              <span>DNI</span>
-              <input id="dni" name="dni" inputmode="numeric" required>
-            </label>
-            <label>
-              <span>Mail asociado a Patagonia</span>
-              <input id="email" name="email" type="email" autocomplete="email" required>
-            </label>
-            <label>
-              <span>Numero de Orden</span>
-              <input id="order_number" name="order_number" required>
-            </label>
-            <label>
-              <span>Monto de la compra</span>
-              <input id="amount" name="amount" type="number" min="0" step="0.01" required>
-            </label>
+        <div class="nav-caption">MENÚ PRINCIPAL</div>
+        <nav class="side-nav" aria-label="Navegación principal">
+          <a class="nav-link active" href="#inicio"><span class="nav-icon">▦</span>Resumen</a>
+          <a class="nav-link" href="#purchasePanel"><span class="nav-icon">＋</span>Nueva compra</a>
+          <a class="nav-link" href="#recordsPanel"><span class="nav-icon">▤</span>Registros</a>
+        </nav>
+
+        <div class="sidebar-spacer"></div>
+        <div class="sidebar-limit">
+          <span class="limit-icon">◉</span>
+          <div><small>Cupo semestral</small><strong id="limitAmount">$1.400.000</strong></div>
+        </div>
+        <div class="sidebar-foot"><span class="status-dot"></span>Seguimiento activo</div>
+      </aside>
+
+      <main class="workspace" id="inicio">
+        <header class="topbar">
+          <div class="breadcrumb"><span>Patagonia</span><b>/</b><strong>Seguimiento de compras</strong></div>
+          <div class="topbar-right">
+            <span class="period-pill"><span class="status-dot"></span><span id="periodText">Cupo semestral vigente</span></span>
+            <button type="button" id="themeToggle" class="theme-toggle" aria-label="Cambiar a modo claro" title="Cambiar a modo claro"><span id="themeIcon" aria-hidden="true">☼</span><span id="themeLabel">Claro</span></button>
+            <span class="avatar" aria-label="Usuario">P</span>
           </div>
-          <div class="actions">
-            <button type="submit" class="primary" id="saveButton">Guardar compra</button>
-            <button type="button" id="cancelButton" class="ghost" hidden>Cancelar edicion</button>
-          </div>
-        </form>
-        <aside id="warningBox" class="warning" hidden></aside>
-      </section>
+        </header>
 
-      <section class="toolbar">
-        <div>
-          <h2>Registros</h2>
-          <p id="periodText">Cupo renovable cada 6 meses desde el 01/05/2026.</p>
+        <div class="page-content">
+          <div class="theme-notice" role="note"><span class="theme-notice-icon" aria-hidden="true">☼</span><span>Podés cambiar el sitio de claro a oscuro cuando lo desees.</span></div>
+          <section class="page-heading">
+            <div>
+              <p class="eyebrow">PANEL DE CONTROL</p>
+              <h1>Seguimiento de compras</h1>
+              <p class="subtitle">Administrá las compras y el cupo disponible por persona.</p>
+            </div>
+            <a class="primary-button heading-action" href="#purchasePanel"><span>＋</span> Nueva compra</a>
+          </section>
+
+          <section class="metric-grid" aria-label="Resumen del período">
+            <article class="metric-card">
+              <div class="metric-top"><span class="metric-label">Cupo por persona</span><span class="metric-icon cyan">◉</span></div>
+              <strong id="metricLimit">$1.400.000</strong>
+              <small>Se renueva cada 6 meses</small>
+            </article>
+            <article class="metric-card">
+              <div class="metric-top"><span class="metric-label">Compras registradas</span><span class="metric-icon blue">▤</span></div>
+              <strong id="metricOrders">—</strong>
+              <small>En todos los períodos</small>
+            </article>
+            <article class="metric-card">
+              <div class="metric-top"><span class="metric-label">Personas registradas</span><span class="metric-icon violet">♙</span></div>
+              <strong id="metricPeople">—</strong>
+              <small>Con compras cargadas</small>
+            </article>
+            <article class="metric-card metric-highlight">
+              <div class="metric-top"><span class="metric-label">Período vigente</span><span class="metric-icon gold">↻</span></div>
+              <strong id="metricPeriod">—</strong>
+              <small id="metricPeriodHint">Renovación semestral</small>
+            </article>
+          </section>
+
+          <section class="entry-panel surface" id="purchasePanel">
+            <div class="section-heading">
+              <div class="section-title-wrap"><span class="section-symbol">＋</span><div><h2>Registrar compra</h2><p>Completá los datos de la orden.</p></div></div>
+              <span class="private-tag"><span>●</span> Registro interno</span>
+            </div>
+            <form id="purchaseForm">
+              <input type="hidden" id="recordId">
+              <div class="form-grid">
+                <label><span>Año fiscal</span><input id="fiscal_year" name="fiscal_year" value="FY27" required></label>
+                <label><span>Fecha de compra</span><input id="purchase_date" name="purchase_date" type="date" required readonly></label>
+                <label class="field-wide"><span>Nombre y apellido</span><input id="full_name" name="full_name" autocomplete="name" placeholder="Ej.: María Pérez" required></label>
+                <label><span>DNI</span><input id="dni" name="dni" inputmode="numeric" placeholder="Sin puntos" required></label>
+                <label class="field-wide"><span>Mail asociado a Patagonia</span><input id="email" name="email" type="email" autocomplete="email" placeholder="nombre@correo.com" required></label>
+                <label><span>Número de orden</span><input id="order_number" name="order_number" placeholder="Ej.: 123456" required></label>
+                <label><span>Monto de la compra</span><div class="amount-input"><span>$</span><input id="amount" name="amount" type="number" min="0" step="0.01" placeholder="0,00" required></div></label>
+              </div>
+              <div class="form-footer">
+                <p><span class="info-icon">i</span> Las compras nuevas se registran con la fecha de hoy.</p>
+                <div class="actions"><button type="button" id="cancelButton" class="secondary-button" hidden>Cancelar edición</button><button type="submit" class="primary-button" id="saveButton">Guardar compra <span>→</span></button></div>
+              </div>
+            </form>
+            <aside id="warningBox" class="warning" hidden></aside>
+          </section>
+
+          <section class="records-section" id="recordsPanel">
+            <div class="records-heading">
+              <div><p class="eyebrow">HISTORIAL</p><h2>Registros de compra</h2><p class="subtitle">Consultá, filtrá y exportá las compras registradas.</p></div>
+              <div class="record-count"><span class="status-dot"></span><span id="recordCount">Registros</span></div>
+            </div>
+
+            <div class="records-toolbar surface">
+              <label class="search-box"><span class="search-icon">⌕</span><input id="search" placeholder="Buscar nombre, DNI, mail u orden" aria-label="Buscar compras"><kbd>⌕</kbd></label>
+              <div class="export-controls">
+                <select id="exportPeriod" aria-label="Período para exportar"><option value="all">Todos los períodos</option></select>
+                <select id="exportPerson" aria-label="Persona para exportar"><option value="all">Todos los empleados</option></select>
+                <a class="export-button" id="exportButton" href="/api/export.xlsx?period=all"><span>⇩</span> Exportar Excel</a>
+              </div>
+            </div>
+
+            <div class="summary-grid" id="summaryGrid" aria-label="Resumen por persona"></div>
+
+            <div class="table-wrap surface">
+              <table>
+                <thead><tr><th>Año fiscal</th><th>Fecha</th><th>Nombre y apellido</th><th>DNI</th><th>Mail</th><th>Número de orden</th><th class="align-right">Monto</th><th>Período</th><th></th></tr></thead>
+                <tbody id="purchaseRows"></tbody>
+              </table>
+              <div class="table-footer"><span>Los registros se conservan en el historial semestral.</span><span class="table-legend"><i></i> Dentro del cupo</span></div>
+            </div>
+          </section>
+          <footer class="page-footer">Patagonia <span>·</span> Seguimiento interno de compras</footer>
         </div>
-        <div class="toolbar-actions">
-          <select id="exportPeriod" aria-label="Período para exportar">
-            <option value="all">Todos los períodos</option>
-          </select>
-          <select id="exportPerson" aria-label="Persona para exportar">
-            <option value="all">Todos los empleados</option>
-          </select>
-          <a class="export-button" id="exportButton" href="/api/export.xlsx?period=all">Exportar Excel</a>
-          <input id="search" placeholder="Buscar por nombre, DNI, mail u orden">
-        </div>
-      </section>
-
-      <section class="summary-grid" id="summaryGrid"></section>
-
-      <section class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>A&ntilde;o Fiscal</th>
-              <th>Fecha de Compra</th>
-              <th>Nombre y Apellido</th>
-              <th>DNI</th>
-              <th>Mail asociado a Patagonia</th>
-              <th>Numero de Orden</th>
-              <th>Monto de la compra</th>
-              <th>Periodo</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="purchaseRows"></tbody>
-        </table>
-      </section>
-    </main>
-
+      </main>
+    </div>
     <script src="/app.js"></script>
   </body>
 </html>

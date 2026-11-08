@@ -5,7 +5,6 @@ import sqlite3
 import threading
 import time
 import unicodedata
-import urllib.error
 import urllib.request
 import zipfile
 from datetime import date, datetime
@@ -229,10 +228,8 @@ def insert_purchase(con, payload, commit=True):
     return cur.lastrowid
 
 
-def normalize_payload(payload, allow_purchase_date=False):
-    purchase_date = date.today().isoformat()
-    if allow_purchase_date:
-        purchase_date = parse_purchase_date(payload.get("purchase_date", "")).isoformat()
+def normalize_payload(payload, force_today=False):
+    purchase_date = date.today().isoformat() if force_today else parse_purchase_date(payload.get("purchase_date")).isoformat()
     required = {
         "fiscal_year": "Año fiscal",
         "full_name": "Nombre y apellido",
@@ -326,18 +323,10 @@ def summaries(current_only=True):
             key = (row["dni"], current_start, current_end)
             if key not in grouped:
                 grouped[key] = {
-                    "dni": row["dni"],
-                    "full_name": row["full_name"],
-                    "email": row["email"],
-                    "period_start": current_start,
-                    "period_end": current_end,
-                    "total": 0,
-                    "orders": 0,
+                    "dni": row["dni"], "full_name": row["full_name"], "email": row["email"],
+                    "period_start": current_start, "period_end": current_end, "total": 0, "orders": 0,
                 }
-        rows = [
-            row for row in rows
-            if current_start <= row["purchase_date"] <= current_end
-        ]
+        rows = [row for row in rows if current_start <= row["purchase_date"] <= current_end]
     for row in rows:
         key = (row["dni"], row["period_start"], row["period_end"])
         if key not in grouped:
@@ -361,211 +350,11 @@ def summaries(current_only=True):
     return sorted(result, key=lambda x: (x["exceeds_limit"], x["total"]), reverse=True)
 
 
-def normalized_name(value):
-    folded = unicodedata.normalize("NFKD", value.casefold())
-    return "".join(char for char in folded if not unicodedata.combining(char)).strip()
-
-
-def search_person_period_totals(query):
-    search = normalized_name(query)
-    if not search:
-        return [], []
-    with db() as con:
-        records = con.execute(
-            "SELECT dni, full_name, purchase_date, amount FROM purchases ORDER BY purchase_date DESC, id DESC"
-        ).fetchall()
-    matching = [row for row in records if search in normalized_name(row["full_name"])]
-    people = {}
-    for row in matching:
-        people.setdefault(row["dni"], row["full_name"])
-    if not people:
-        return [], []
-    exact = [dni for dni, name in people.items() if normalized_name(name) == search]
-    if len(exact) == 1:
-        selected = exact
-        people = {dni: people[dni] for dni in selected}
-        matching = [row for row in matching if row["dni"] in people]
-    if len(people) != 1:
-        return [(name, dni) for dni, name in people.items()], []
-
-    dni, name = next(iter(people.items()))
-    totals = {}
-    for row in matching:
-        start, _ = period_for(row["purchase_date"])
-        totals[start] = totals.get(start, 0) + float(row["amount"])
-
-    current_start, _ = period_for(date.today().isoformat())
-    first_start = min(totals)
-    final_start = max(current_start, max(totals))
-    periods = []
-    cursor = parse_purchase_date(first_start)
-    final = parse_purchase_date(final_start)
-    while cursor <= final:
-        start, end = period_for(cursor.isoformat())
-        periods.append((start, end, round(totals.get(start, 0), 2)))
-        cursor = date(cursor.year + (cursor.month + PERIOD_MONTHS - 1) // 12,
-                      (cursor.month + PERIOD_MONTHS - 1) % 12 + 1, 1)
-    return [], {"name": name, "dni": dni, "periods": periods}
-
-
-def all_people_period_totals():
-    with db() as con:
-        records = con.execute(
-            "SELECT dni, full_name, purchase_date, amount FROM purchases ORDER BY full_name, purchase_date, id"
-        ).fetchall()
-    people = {}
-    for row in records:
-        person = people.setdefault(row["dni"], {"name": row["full_name"], "period_totals": {}})
-        start, _ = period_for(row["purchase_date"])
-        person["period_totals"][start] = person["period_totals"].get(start, 0) + float(row["amount"])
-
-    current_start, _ = period_for(date.today().isoformat())
-    result = []
-    for dni, person in people.items():
-        totals = person["period_totals"]
-        first = parse_purchase_date(min(totals))
-        last = max(parse_purchase_date(current_start), parse_purchase_date(max(totals)))
-        periods = []
-        cursor = first
-        while cursor <= last:
-            start, end = period_for(cursor.isoformat())
-            periods.append((start, end, round(totals.get(start, 0), 2)))
-            cursor = date(cursor.year + (cursor.month + PERIOD_MONTHS - 1) // 12,
-                          (cursor.month + PERIOD_MONTHS - 1) % 12 + 1, 1)
-        result.append({"name": person["name"], "dni": dni, "periods": periods})
-    return sorted(result, key=lambda person: normalized_name(person["name"]))
-
-
-def format_telegram_totals(result):
-    lines = [f"Compras de {result['name']} (DNI {result['dni']}):"]
-    for start, end, total in result["periods"]:
-        lines.append(f"{format_display_date(start)} al {format_display_date(end)}: ${total:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-    return "\n".join(lines)
-
-
-def format_telegram_all_totals(people):
-    if not people:
-        return "Todavía no hay compras registradas."
-    blocks = ["Totales de todas las personas con compras:"]
-    for person in people:
-        block = [f"{person['name']} · DNI {person['dni']}"]
-        block.extend(
-            f"  {format_display_date(start)} al {format_display_date(end)}: ${total:,.2f}"
-            .replace(",", "X").replace(".", ",").replace("X", ".")
-            for start, end, total in person["periods"]
-        )
-        blocks.append("\n".join(block))
-    return "\n\n".join(blocks)
-
-
-def send_telegram_long_message(token, chat_id, text):
-    max_length = 3500
-    chunks = []
-    current = ""
-    for block in text.split("\n\n"):
-        addition = block if not current else f"\n\n{block}"
-        if len(current) + len(addition) <= max_length:
-            current += addition
-            continue
-        if current:
-            chunks.append(current)
-        while len(block) > max_length:
-            chunks.append(block[:max_length])
-            block = block[max_length:]
-        current = block
-    if current:
-        chunks.append(current)
-    for chunk in chunks:
-        send_telegram_message(token, chat_id, chunk)
-
-
-def telegram_request(token, method, payload):
-    url = f"https://api.telegram.org/bot{token}/{method}"
-    body = json.dumps(payload).encode("utf-8")
-    request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(request, timeout=35) as response:
-        result = json.loads(response.read().decode("utf-8"))
-    if not result.get("ok"):
-        raise RuntimeError(result.get("description", "Error de Telegram"))
-    return result["result"]
-
-
-def send_telegram_message(token, chat_id, text):
-    telegram_request(token, "sendMessage", {"chat_id": chat_id, "text": text})
-
-
-def handle_telegram_message(token, allowed_chats, message):
-    chat_id = str(message.get("chat", {}).get("id", ""))
-    if chat_id not in allowed_chats:
-        return
-    text = (message.get("text") or "").strip()
-    if text.startswith("/"):
-        command, _, argument = text.partition(" ")
-        command = command.split("@", 1)[0].lower()
-        if command in ("/start", "/help", "/ayuda"):
-            send_telegram_message(token, chat_id, "Escribí un nombre para ver sus totales por semestre, o enviá «todos» para listar a todas las personas con compras.")
-            return
-        if command in ("/todos", "/todas"):
-            send_telegram_long_message(token, chat_id, format_telegram_all_totals(all_people_period_totals()))
-            return
-        query = argument.strip()
-    else:
-        query = text
-    if not query:
-        send_telegram_message(token, chat_id, "Escribí un nombre para buscar.")
-        return
-
-    if normalized_name(query) in ("todos", "todo", "todas", "todos los empleados", "todas las personas"):
-        send_telegram_long_message(token, chat_id, format_telegram_all_totals(all_people_period_totals()))
-        return
-
-    matches, result = search_person_period_totals(query)
-    if result:
-        send_telegram_message(token, chat_id, format_telegram_totals(result))
-    elif matches:
-        options = "\n".join(f"• {name} · DNI {dni}" for name, dni in matches[:15])
-        suffix = "\nHay más coincidencias; afiná la búsqueda." if len(matches) > 15 else "\nEscribí más letras del nombre para precisar."
-        send_telegram_message(token, chat_id, f"Encontré varias personas:\n{options}{suffix}")
-    else:
-        send_telegram_message(token, chat_id, "No encontré compras con ese nombre.")
-
-
-def telegram_polling_loop(token, allowed_chats):
-    offset = None
-    while True:
-        try:
-            payload = {"timeout": 25, "allowed_updates": ["message"]}
-            if offset is not None:
-                payload["offset"] = offset
-            updates = telegram_request(token, "getUpdates", payload)
-            for update in updates:
-                offset = update["update_id"] + 1
-                message = update.get("message")
-                if message:
-                    try:
-                        handle_telegram_message(token, allowed_chats, message)
-                    except Exception as exc:
-                        print(f"Error procesando mensaje de Telegram: {exc}")
-        except Exception as exc:
-            print(f"Error consultando Telegram: {exc}")
-            time.sleep(5)
-
-
-def start_telegram_bot():
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    allowed_chats = {
-        item.strip()
-        for item in os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "").split(",")
-        if item.strip()
-    }
-    if not token:
-        print("Bot de Telegram desactivado: falta TELEGRAM_BOT_TOKEN.")
-        return
-    if not allowed_chats:
-        print("Bot de Telegram desactivado: falta TELEGRAM_ALLOWED_CHAT_IDS.")
-        return
-    threading.Thread(target=telegram_polling_loop, args=(token, allowed_chats), daemon=True).start()
-    print("Bot de búsqueda de Telegram iniciado.")
+def employee_directory():
+    latest = {}
+    for row in reversed(purchase_query()):
+        latest[row["dni"]] = {"dni": row["dni"], "full_name": row["full_name"]}
+    return sorted(latest.values(), key=lambda item: item["full_name"].casefold())
 
 
 def excel_col(index):
@@ -733,6 +522,194 @@ def format_display_date(value):
     return parsed.strftime("%d/%m/%Y")
 
 
+def normalized_name(value):
+    folded = unicodedata.normalize("NFKD", value.casefold())
+    return "".join(char for char in folded if not unicodedata.combining(char)).strip()
+
+
+def telegram_amount(value):
+    return f"${value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def add_semester(start):
+    month_index = start.month - 1 + PERIOD_MONTHS
+    return date(start.year + month_index // 12, month_index % 12 + 1, 1)
+
+
+def person_totals(name_query):
+    search = normalized_name(name_query)
+    with db() as con:
+        records = con.execute(
+            "SELECT dni, full_name, purchase_date, amount FROM purchases ORDER BY purchase_date DESC, id DESC"
+        ).fetchall()
+    matching = [row for row in records if search in normalized_name(row["full_name"])]
+    names = {}
+    for row in matching:
+        names.setdefault(row["dni"], row["full_name"])
+    exact = [dni for dni, name in names.items() if normalized_name(name) == search]
+    if len(exact) == 1:
+        names = {exact[0]: names[exact[0]]}
+        matching = [row for row in matching if row["dni"] == exact[0]]
+    if len(names) != 1:
+        return [(name, dni) for dni, name in names.items()], None
+
+    dni, name = next(iter(names.items()))
+    totals = {}
+    for row in matching:
+        start, _ = period_for(row["purchase_date"])
+        totals[start] = totals.get(start, 0) + float(row["amount"])
+    current_start, _ = period_for(date.today().isoformat())
+    cursor = parse_purchase_date(min(totals))
+    last = max(parse_purchase_date(current_start), parse_purchase_date(max(totals)))
+    periods = []
+    while cursor <= last:
+        period_start, period_end = period_for(cursor.isoformat())
+        periods.append((period_start, period_end, round(totals.get(period_start, 0), 2)))
+        cursor = add_semester(cursor)
+    return [], {"name": name, "dni": dni, "periods": periods}
+
+
+def all_person_totals():
+    with db() as con:
+        records = con.execute(
+            "SELECT dni, full_name, purchase_date, amount FROM purchases ORDER BY full_name, purchase_date, id"
+        ).fetchall()
+    people = {}
+    for row in records:
+        person = people.setdefault(row["dni"], {"name": row["full_name"], "totals": {}})
+        period_start, _ = period_for(row["purchase_date"])
+        person["totals"][period_start] = person["totals"].get(period_start, 0) + float(row["amount"])
+    current_start, _ = period_for(date.today().isoformat())
+    result = []
+    for dni, person in people.items():
+        totals = person["totals"]
+        cursor = parse_purchase_date(min(totals))
+        last = max(parse_purchase_date(current_start), parse_purchase_date(max(totals)))
+        periods = []
+        while cursor <= last:
+            period_start, period_end = period_for(cursor.isoformat())
+            periods.append((period_start, period_end, round(totals.get(period_start, 0), 2)))
+            cursor = add_semester(cursor)
+        result.append({"name": person["name"], "dni": dni, "periods": periods})
+    return sorted(result, key=lambda person: normalized_name(person["name"]))
+
+
+def format_person_totals(person):
+    lines = [f"Compras de {person['name']} (DNI {person['dni']}):"]
+    lines.extend(
+        f"{format_display_date(start)} al {format_display_date(end)}: {telegram_amount(total)}"
+        for start, end, total in person["periods"]
+    )
+    return "\n".join(lines)
+
+
+def format_all_totals(people):
+    if not people:
+        return "Todavía no hay compras registradas."
+    blocks = ["Totales de todas las personas con compras:"]
+    for person in people:
+        lines = [f"{person['name']} · DNI {person['dni']}"]
+        lines.extend(
+            f"  {format_display_date(start)} al {format_display_date(end)}: {telegram_amount(total)}"
+            for start, end, total in person["periods"]
+        )
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def telegram_call(token, method, payload):
+    url = f"https://api.telegram.org/bot{token}/{method}"
+    request = urllib.request.Request(
+        url, data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=35) as response:
+        result = json.loads(response.read().decode("utf-8"))
+    if not result.get("ok"):
+        raise RuntimeError(result.get("description", "Error de Telegram"))
+    return result["result"]
+
+
+def send_telegram(token, chat_id, text):
+    chunks = []
+    current = ""
+    for block in text.split("\n\n"):
+        next_text = block if not current else f"{current}\n\n{block}"
+        if len(next_text) <= 3500:
+            current = next_text
+        else:
+            if current:
+                chunks.append(current)
+            while len(block) > 3500:
+                chunks.append(block[:3500])
+                block = block[3500:]
+            current = block
+    if current:
+        chunks.append(current)
+    for chunk in chunks:
+        telegram_call(token, "sendMessage", {"chat_id": chat_id, "text": chunk})
+
+
+def process_telegram_message(token, allowed_chats, message):
+    chat_id = str(message.get("chat", {}).get("id", ""))
+    if chat_id not in allowed_chats:
+        return
+    text = (message.get("text") or "").strip()
+    command, _, argument = text.partition(" ")
+    command = command.split("@", 1)[0].lower() if command.startswith("/") else ""
+    if command in ("/start", "/help", "/ayuda"):
+        send_telegram(token, chat_id, "Escribí un nombre para consultar los totales por semestre, o «todos» para ver el listado completo.")
+        return
+    if command in ("/todos", "/todas") or normalized_name(text) in ("todos", "todo", "todas", "todos los empleados", "todas las personas"):
+        send_telegram(token, chat_id, format_all_totals(all_person_totals()))
+        return
+    query = argument.strip() if command else text
+    if not query:
+        send_telegram(token, chat_id, "Escribí el nombre y apellido de la persona que querés consultar.")
+        return
+    matches, person = person_totals(query)
+    if person:
+        send_telegram(token, chat_id, format_person_totals(person))
+    elif matches:
+        options = "\n".join(f"• {name} · DNI {dni}" for name, dni in matches[:15])
+        send_telegram(token, chat_id, f"Encontré varias personas:\n{options}\nEscribí más letras del nombre para precisar.")
+    else:
+        send_telegram(token, chat_id, "No encontré compras con ese nombre.")
+
+
+def telegram_polling(token, allowed_chats):
+    offset = None
+    while True:
+        try:
+            payload = {"timeout": 25, "allowed_updates": ["message"]}
+            if offset is not None:
+                payload["offset"] = offset
+            updates = telegram_call(token, "getUpdates", payload)
+            for update in updates:
+                offset = update["update_id"] + 1
+                message = update.get("message")
+                if message:
+                    try:
+                        process_telegram_message(token, allowed_chats, message)
+                    except Exception as exc:
+                        print(f"Error procesando mensaje de Telegram: {exc}")
+        except Exception as exc:
+            print(f"Error consultando Telegram: {exc}")
+            time.sleep(5)
+
+
+def start_telegram_bot():
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    allowed_chats = {
+        item.strip() for item in os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", "").split(",") if item.strip()
+    }
+    if not token or not allowed_chats:
+        print("Bot de Telegram desactivado: configura TELEGRAM_BOT_TOKEN y TELEGRAM_ALLOWED_CHAT_IDS para activarlo.")
+        return
+    threading.Thread(target=telegram_polling, args=(token, allowed_chats), daemon=True).start()
+    print("Bot de búsqueda de Telegram iniciado.")
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args))
@@ -762,10 +739,7 @@ class Handler(BaseHTTPRequestHandler):
                     "period_months": PERIOD_MONTHS,
                     "current_period_start": period_start,
                     "current_period_end": period_end,
-                    "employees": [
-                        {"dni": row["dni"], "full_name": row["full_name"]}
-                        for row in {item["dni"]: item for item in reversed(purchase_query())}.values()
-                    ],
+                    "employees": employee_directory(),
                 }
             )
             return
@@ -826,7 +800,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             payload = self.read_json()
-            row = normalize_payload(payload)
+            row = normalize_payload(payload, force_today=True)
             check = enriched_purchase(row.copy())
             with db() as con:
                 new_id = insert_purchase(con, row)
@@ -841,7 +815,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             purchase_id = int(self.path.rsplit("/", 1)[1])
-            row = normalize_payload(self.read_json(), allow_purchase_date=True)
+            row = normalize_payload(self.read_json())
             check = enriched_purchase({**row, "id": purchase_id})
             with db() as con:
                 con.execute(
